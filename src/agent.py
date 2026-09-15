@@ -279,7 +279,83 @@ def run_planning_agent(
         A PlanRun. This function does not raise for ordinary failures -- it
         reports them through stopped_reason and final_answer.
     """
-    raise NotImplementedError("TODO A2: implement the plan/act/observe/replan loop")
+    if not isinstance(goal, str) or not goal.strip():
+        return _stopped(
+            goal=goal,
+            plan=list(plan) if plan is not None else [],
+            reason="error",
+            answer="Please type a goal first.",
+        )
+
+    goal = goal.strip()
+    current_plan = (
+        list(plan)
+        if plan is not None
+        else write_plan(goal, max_steps=max_steps)
+    )
+    if not current_plan:
+        return _stopped(
+            goal=goal,
+            plan=current_plan,
+            reason="error",
+            answer="I couldn't draft a plan. Please rephrase your goal and try again.",
+        )
+
+    if approve_plan is not None and not approve_plan(current_plan):
+        return _stopped(
+            goal=goal,
+            plan=current_plan,
+            reason="cancelled",
+            answer="Cancelled before any tool ran.",
+        )
+
+    recorder = _RunRecorder(
+        goal=goal,
+        initial_plan=current_plan,
+        on_step_done=on_step_done,
+    )
+    remaining = list(current_plan)
+    done: list[tuple[Step, str]] = []
+
+    while remaining:
+        step = remaining.pop(0)
+        prior_summary = "\n".join(
+            f"step {done_step.n}: {observation}"
+            for done_step, observation in done
+        )
+        result = execute_step(
+            step=step,
+            goal=goal,
+            prior_summary=prior_summary,
+            max_tool_calls=per_step_tool_calls,
+        )
+        recorder.record_step(result)
+        done.append((step, result.observation))
+
+        should_revise = (
+            result.observation.lower().startswith("surprise")
+            and bool(remaining)
+            and recorder.revision_count < max_revisions
+        )
+        if not should_revise:
+            continue
+
+        before_revision = list(remaining)
+        remaining = revise_plan(
+            goal=goal,
+            done=done,
+            remaining=before_revision,
+            observation=result.observation,
+            max_steps=max_steps,
+        )
+        recorder.record_revision(
+            after_step=step.n,
+            trigger=result.observation,
+            before=before_revision,
+            after=remaining,
+        )
+
+    return recorder.finish(stopped_reason="done")
 
 
 # ===========================================================================

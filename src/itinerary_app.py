@@ -299,6 +299,21 @@ def _tool_cards_html(result: StepResult) -> str:
     return "".join(cards)
 
 
+def _render_step(result: StepResult) -> None:
+    st.markdown(_step_card_html(result), unsafe_allow_html=True)
+    with st.expander(f"Step {result.step.n} details"):
+        st.markdown("**Step output**")
+        st.markdown(
+            _html_escape(result.text or "No output recorded.").replace("\n", "<br/>"),
+            unsafe_allow_html=True,
+        )
+        st.markdown("**Tool calls**")
+        if result.tool_calls:
+            st.markdown(_tool_cards_html(result), unsafe_allow_html=True)
+        else:
+            st.caption("No tool calls in this step.")
+
+
 def _render_run(goal: str, run: PlanRun) -> None:
     # User goal pill
     st.markdown(
@@ -316,29 +331,40 @@ def _render_run(goal: str, run: PlanRun) -> None:
     if run.initial_plan:
         st.markdown(_plan_html(run.initial_plan), unsafe_allow_html=True)
 
-    # ===================================================================
-    # TODO A3 -- render the step trace and any mid-run replans
-    # ===================================================================
-    #
-    # A reviewer looking at this page must be able to answer, without opening
-    # a terminal: what did the agent do, in what order, what did each step
-    # conclude, which tools ran with which arguments, and -- if the plan
-    # changed mid-run -- when it changed and what triggered it.
-    #
-    # `run.step_results` holds one StepResult per executed step.
-    # `run.revisions` holds one dict per replan, with keys "after_step",
-    # "trigger", "before" and "after".
-    #
-    # _step_card_html() and _tool_cards_html() are written for you just above
-    # and return HTML strings. Render HTML with
-    # st.markdown(..., unsafe_allow_html=True), and put per-step detail behind
-    # st.expander(...) so the page stays scannable.
-    #
-    # Escape anything that came from the model or the web before it reaches
-    # the page. Delete the caption below when you are done.
-    st.caption("TODO A3: render the step trace and revision panel here.")
-    # END TODO A3
-    # ===================================================================
+    st.markdown("### Step trace")
+    if not run.step_results:
+        st.caption("No steps were executed.")
+    if not run.revisions:
+        st.caption("No plan revisions.")
+
+    for result in run.step_results:
+        _render_step(result)
+        # Place each replan at the point where it changed the remaining work.
+        for revision in run.revisions:
+            if revision["after_step"] != result.step.n:
+                continue
+            st.markdown(
+                f'<div class="revision-card"><strong>Plan revised after step '
+                f'{_html_escape(str(revision["after_step"]))}</strong><br/>'
+                f'Trigger: {_html_escape(revision["trigger"])}</div>',
+                unsafe_allow_html=True,
+            )
+            with st.expander(f"Plan changes after step {result.step.n}"):
+                for key, title in (("before", "Before"), ("after", "After")):
+                    st.markdown(f"**{title}: remaining steps**")
+                    if not revision[key]:
+                        st.caption("No remaining steps.")
+                        continue
+                    items = "".join(
+                        f'<li value="{_html_escape(str(step["n"]))}">'
+                        f'{_html_escape(step["goal"])}'
+                        f'<span class="hint">{_html_escape(step["tool_hint"])}</span></li>'
+                        for step in revision[key]
+                    )
+                    st.markdown(
+                        f'<div class="plan-card"><ol>{items}</ol></div>',
+                        unsafe_allow_html=True,
+                    )
 
     # Cover image
     if run.image_url:
@@ -392,6 +418,12 @@ if st.session_state["pending_plan"] is not None:
     c1, c2 = st.columns(2)
     if c1.button("Approve and run", type="primary", use_container_width=True):
         goal = pending["goal"]
+        live_trace = st.container()
+
+        def show_completed_step(result: StepResult) -> None:
+            with live_trace:
+                _render_step(result)
+
         with st.status("Running approved plan...", expanded=False) as status:
             t0 = time.time()
             # Run the plan the user actually approved -- not a fresh draft.
@@ -403,6 +435,7 @@ if st.session_state["pending_plan"] is not None:
                 max_steps=max_steps,
                 max_revisions=max_revisions,
                 per_step_tool_calls=per_step_calls,
+                on_step_done=show_completed_step,
             )
             elapsed = time.time() - t0
             status.update(

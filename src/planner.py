@@ -184,7 +184,65 @@ def revise_plan(
     renumbering case; `write_plan` above does not need it, so it does not show
     it. Read `write_plan` first -- it is the same shape of problem.
     """
-    raise NotImplementedError("TODO A1: implement revise_plan")
+    if not remaining:
+        return []
+
+    # max_steps applies to the whole run, so completed steps have already used
+    # part of the budget available to the reviser.
+    available_steps = max(0, max_steps - len(done))
+    if available_steps == 0:
+        return []
+
+    next_step_number = done[-1][0].n + 1 if done else 1
+    done_text = "\n".join(
+        f"- step {step.n}: {step.goal} "
+        f"[tool_hint: {step.tool_hint}]\n  observation: {step_observation}"
+        for step, step_observation in done
+    ) or "- none"
+    remaining_text = "\n".join(
+        f"- step {step.n}: {step.goal} [tool_hint: {step.tool_hint}]"
+        for step in remaining
+    )
+    user_msg = (
+        f"Original goal:\n{goal}\n\n"
+        f"Already done:\n{done_text}\n\n"
+        f"Still remaining:\n{remaining_text}\n\n"
+        f"Most recent observation triggering this revision:\n{observation}\n\n"
+        f"Rewrite or keep the remaining plan now. Return at most "
+        f"{available_steps} remaining steps, starting at step {next_step_number}."
+    )
+
+    try:
+        raw = chat(
+            [
+                {"role": "system", "content": REVISER_SYSTEM},
+                {"role": "user", "content": user_msg},
+            ],
+            temperature=0.3,
+            max_tokens=500,
+        )
+    except Exception:
+        # A failed revision must leave the already-approved queue intact.
+        return remaining
+
+    revised = _parse_plan(
+        raw,
+        max_steps=available_steps,
+        expect_start_at=next_step_number,
+    )
+    if not revised:
+        return remaining
+
+    # Treat model-provided numbers as untrusted. The executor needs a
+    # contiguous sequence that follows the last completed step.
+    return [
+        Step(
+            n=next_step_number + index,
+            goal=step.goal,
+            tool_hint=step.tool_hint,
+        )
+        for index, step in enumerate(revised)
+    ]
 
 
 # ===========================================================================
