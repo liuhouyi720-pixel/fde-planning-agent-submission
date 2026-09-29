@@ -1,27 +1,23 @@
 # Decisions
 
-*Replace everything below. Two questions, three to five sentences each. We are
-more interested in your reasoning than your formatting.*
-
----
-
 ## What I deliberately did not do, and why
 
-Things I found, judged, and left alone, including anything in the code that
-shipped with this exercise, and what it would take to change my mind. Three to
-five sentences. Generic "with more time I'd add tests" is worth almost nothing;
-one specific thing you saw and consciously walked past is worth a lot.
+For this submission, I am keeping the scope to the required planning loop and trace UI, preserving the supplied prompts and result shapes.
+I considered letting users edit the proposed plan, request changes through chat, and require particular tools, but deferred those extensions because they introduce new approval, validation, and execution guarantees beyond A1-A3.
+During review, I found that the supplied observer sees only the current step goal and up to 1,200 characters of executor output, without the full remaining plan, while the replay fixture labels a fixed rain phrase as a surprise even when rain was already part of the user's request.
+I left that observer unchanged for this exercise, accepting that it can trigger unnecessary replanning or miss a necessary change, and that a `thin` observation currently continues without a recovery step.
+Before a customer pilot, I would revisit it with labeled examples such as a rain-related closure affecting a planned outdoor visit versus rain that does not affect an indoor plan, and add context or recovery behavior where those examples expose failures.
 
 ## How I would know this works
 
-If this ran for the customer's ops team next week, what would tell us it is
-working, and what would tell us it has quietly broken? Be concrete: what do you
-measure, on what, how do you get a repeatable read on a system that is
-non-deterministic by construction, and what number is bad? Three to five
-sentences.
+The local replay check passed all 29 tests and completed the Lisbon demo with a recorded replan, but the canned final answer still described one day despite the two-day request, so this demonstrates control flow rather than itinerary quality.
+I would require zero failures for approval-before-execution, execution of the approved starting plan, preservation of completed steps, and configured step, revision, and tool-call limits, adding targeted tests where the current suite does not cover them.
+For model evaluation, I would use 20 fixed, human-labeled scenarios covering known rain, unexpected closures, empty results, and budget or duration constraints, run each five times with a fixed model version, prompts, settings, and tool responses, and save the traces for regression replay.
+My proposed pilot gates would be zero missed must-replan cases, no more than 10% unnecessary replans on cases labeled keep-plan, and at least 90% of final answers accepted by a coordinator against a checklist of user constraints, feasibility, and source support; these are proposed thresholds, not measured results.
+During a pilot, I would review a fixed weekly sample of 20 runs with the same checklist and compare median coordinator editing time against the roughly 40-minute manual baseline, pausing expansion if acceptance fell below 90% or editing time did not improve.
 
 ---
 
-**AI assistance:** roughly how you used it, and where you did or did not trust it.
+**AI assistance:** AI generated the Part A implementation and added UI tests, explained the code and its limitations, ran the local checks, and drafted this document; my confidence is limited to the observed checks, and I have not independently validated live-model quality.
 
-**Time spent:** roughly how long, and on what.
+**Time spent:** About 3 hours on implementation and verification, and over 5 hours in total including background reading to understand agent fundamentals such as tool schemas and execution loops.
